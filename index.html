@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Produção Discreta - DP Interativo Visual</title>
+<title>Produção Discreta - DP com Decisão</title>
 <style>
 body{font-family:Arial, sans-serif;padding:18px;background:#f7f9fb;color:#111}
 h1{font-size:22px;margin-bottom:12px}
@@ -22,7 +22,7 @@ td.wrong{background:#fee2e2;color:#9b1c1c}
 </head>
 <body>
 
-<h1>Produção Discreta - DP Interativo Visual</h1>
+<h1>Produção Discreta - DP Interativo com Decisão</h1>
 
 <div class="input-row">
 <label>Aluno:</label>
@@ -36,14 +36,14 @@ td.wrong{background:#fee2e2;color:#9b1c1c}
 
 <div id="formArea"></div>
 <div id="tableArea"></div>
-<div id="feedback" class="status">Preencha as demandas e custos e clique em Criar Tabela DP.</div>
+<div id="feedback" class="status">Preencha as demandas, custos e clique em Criar Tabela DP.</div>
 
 <!-- jsPDF CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script>
 // --- Dados ---
-let problem=null, optimalDP=null;
+let problem=null, optimalX=null;
 
 // --- Gerar inputs de demanda e custos ---
 function renderForm(){
@@ -77,27 +77,25 @@ function readProblem(){
   return {n,Q,demand,prodCost,holdCost};
 }
 
-// --- Criar tabela DP para produção discreta ---
+// --- Construir tabela DP interna (calcular produção ótima) ---
 function buildTable(){
   problem = readProblem();
-  const {n,Q} = problem;
-
-  // DP: custo mínimo acumulado
-  optimalDP = Array.from({length:n+1}, ()=>Array(Q+1).fill(Infinity));
-  optimalDP[0][0]=0; // custo inicial zero, estoque inicial zero
+  const {n,Q,demand,prodCost,holdCost} = problem;
+  
+  const dp = Array.from({length:n+1},()=>Array(Q+1).fill(Infinity));
+  const xDecision = Array.from({length:n+1},()=>Array(Q+1).fill(0));
+  dp[0][0] = 0;
 
   for(let t=1;t<=n;t++){
-    const d = problem.demand[t-1];
-    const c = problem.prodCost[t-1];
-    const h = problem.holdCost[t-1];
-    for(let s=0;s<=Q;s++){ // estoque no período anterior
-      if(optimalDP[t-1][s] < Infinity){
-        for(let x=0;x<=Q-s;x++){ // produção no período t
-          if(x+s >= d){
-            const nextStock = x+s-d;
-            const cost = optimalDP[t-1][s] + x*c + nextStock*h;
-            if(cost < optimalDP[t][nextStock]){
-              optimalDP[t][nextStock]=cost;
+    for(let sPrev=0;sPrev<=Q;sPrev++){
+      if(dp[t-1][sPrev] < Infinity){
+        for(let x=0;x<=Q;x++){
+          const sFinal = sPrev + x - demand[t-1];
+          if(sFinal>=0 && sFinal<=Q){
+            const cost = dp[t-1][sPrev] + x*prodCost[t-1] + sFinal*holdCost[t-1];
+            if(cost < dp[t][sFinal]){
+              dp[t][sFinal] = cost;
+              xDecision[t][sFinal] = x;
             }
           }
         }
@@ -105,6 +103,7 @@ function buildTable(){
     }
   }
 
+  optimalX = xDecision;
   renderStudentTable();
 }
 
@@ -112,26 +111,27 @@ function buildTable(){
 function renderStudentTable(){
   const {n,Q} = problem;
   const container = document.getElementById('tableArea');
-  container.innerHTML='<strong>Preencha a tabela DP de custos acumulados:</strong>';
+  container.innerHTML='<strong>Preencha a produção (x_t) para cada período e estoque final:</strong>';
   const tbl = document.createElement('table');
   const thead = document.createElement('thead');
   const htr = document.createElement('tr');
   htr.appendChild(document.createElement('th'));
   for(let s=0;s<=Q;s++){
-    const th = document.createElement('th'); th.innerText=s;
+    const th = document.createElement('th'); th.innerText=`Estoque ${s}`;
     htr.appendChild(th);
   }
   thead.appendChild(htr);
   tbl.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  for(let t=0;t<=n;t++){
+  for(let t=1;t<=n;t++){
     const tr = document.createElement('tr');
-    const td0 = document.createElement('td'); td0.innerText=t; tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.innerText=`Período ${t}`; tr.appendChild(td0);
     for(let s=0;s<=Q;s++){
       const td = document.createElement('td');
       const input = document.createElement('input');
-      input.type='number'; input.style.width='60px'; input.dataset.t=t; input.dataset.s=s;
+      input.type='number'; input.style.width='60px'; 
+      input.dataset.t=t; input.dataset.s=s;
       td.appendChild(input);
       tr.appendChild(td);
     }
@@ -141,13 +141,13 @@ function renderStudentTable(){
   container.appendChild(tbl);
 
   const btnCheck = document.createElement('button');
-  btnCheck.innerText='Verificar Tabela';
+  btnCheck.innerText='Verificar Produção';
   btnCheck.style.marginTop='10px';
   btnCheck.addEventListener('click', checkTable);
   container.appendChild(btnCheck);
 }
 
-// --- Verificar tabela do aluno e gerar nota ---
+// --- Verificar respostas do aluno ---
 function checkTable(){
   const studentName = document.getElementById('studentName').value.trim();
   if(!studentName){
@@ -157,11 +157,12 @@ function checkTable(){
 
   const inputs = document.querySelectorAll('#tableArea input[type="number"]');
   let correctCount = 0;
+
   inputs.forEach(inp=>{
     const t = +inp.dataset.t;
     const s = +inp.dataset.s;
     const val = +inp.value;
-    if(optimalDP[t][s] === val){
+    if(optimalX[t][s] === val){
       correctCount++;
       inp.parentElement.className='correct';
     } else {
@@ -174,17 +175,17 @@ function checkTable(){
 
   const fb = document.getElementById('feedback');
   if(score === 100){
-    fb.innerText=`✅ Parabéns, ${studentName}! Tabela correta. Nota: ${score}/100`;
+    fb.innerText=`✅ Parabéns, ${studentName}! Todas as decisões corretas. Nota: ${score}/100`;
     fb.className='status ok';
   } else {
-    fb.innerText=`❌ Alguns valores estão incorretos. Nota: ${score}/100`;
+    fb.innerText=`❌ Algumas decisões incorretas. Nota: ${score}/100`;
     fb.className='status error';
   }
 
   addDownloadButton(studentName, score, correctCount, totalCells);
 }
 
-// --- Adicionar botão de download do PDF ---
+// --- Adicionar botão PDF ---
 function addDownloadButton(name, score, correct, total){
   const existingBtn = document.getElementById('downloadPDF');
   if(existingBtn) existingBtn.remove();
@@ -199,7 +200,7 @@ function addDownloadButton(name, score, correct, total){
   document.getElementById('tableArea').appendChild(btn);
 }
 
-// --- Gerar PDF com jsPDF ---
+// --- Gerar PDF ---
 function generatePDF(name, score, correct, total){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
@@ -208,7 +209,7 @@ function generatePDF(name, score, correct, total){
   doc.setFontSize(12);
   doc.text(`Aluno: ${name}`, 20, 35);
   doc.text(`Nota: ${score}/100`, 20, 45);
-  doc.text(`Células corretas: ${correct} de ${total}`, 20, 55);
+  doc.text(`Decisões corretas: ${correct} de ${total}`, 20, 55);
   doc.text('Células corretas aparecem em verde e incorretas em vermelho na tabela.', 20, 65);
   doc.save(`Relatorio_${name.replace(/\s+/g,'_')}.pdf`);
 }
@@ -217,6 +218,5 @@ function generatePDF(name, score, correct, total){
 document.getElementById('build').addEventListener('click', renderForm);
 
 </script>
-
 </body>
 </html>
