@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Produção Discreta - DP com Decisão</title>
+<title>Produção Discreta - DP com Lotes</title>
 <style>
 body{font-family:Arial, sans-serif;padding:18px;background:#f7f9fb;color:#111}
 h1{font-size:22px;margin-bottom:12px}
@@ -22,38 +22,38 @@ td.wrong{background:#fee2e2;color:#9b1c1c}
 </head>
 <body>
 
-<h1>Produção Discreta - DP Interativo com Decisão</h1>
+<h1>Produção Discreta - DP com Lotes (Estoque Final Possível)</h1>
 
 <div class="input-row">
 <label>Aluno:</label>
 <input id="studentName" type="text" placeholder="Digite seu nome"/>
 <label>Períodos (n):</label>
 <input id="nPeriods" type="number" value="3" min="1"/>
-<label>Capacidade máxima (Q):</label>
-<input id="maxProd" type="number" value="5" min="1"/>
-<button id="build">Gerar Demanda</button>
+<label>Estoque máximo (Q):</label>
+<input id="maxStock" type="number" value="2000" min="1"/>
+<button id="build">Gerar Períodos</button>
 </div>
 
 <div id="formArea"></div>
 <div id="tableArea"></div>
-<div id="feedback" class="status">Preencha as demandas, custos e clique em Criar Tabela DP.</div>
+<div id="feedback" class="status">Preencha demandas, custos e lotes, depois clique em Criar Tabela DP.</div>
 
-<!-- jsPDF CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
 <script>
-// --- Dados ---
-let problem=null, optimalX=null;
+let problem=null, optimalCost=null, possibleStocks=[];
 
-// --- Gerar inputs de demanda e custos ---
+// --- Gerar inputs ---
 function renderForm(){
   const n = +document.getElementById('nPeriods').value;
   const form = document.getElementById('formArea');
-  form.innerHTML='<strong>Insira demanda e custos:</strong><br/>';
+  form.innerHTML='<strong>Insira demanda, custos e lotes permitidos:</strong><br/>';
   for(let i=0;i<n;i++){
     const row = document.createElement('div');
     row.className='input-row';
-    row.innerHTML = `Período ${i+1}: Demanda <input type="number" id="d_${i}" value="1"/> Custo Produção <input type="number" id="c_${i}" value="1"/> Custo Estoque <input type="number" id="h_${i}" value="1"/>`;
+    row.innerHTML = `Período ${i+1}: Demanda <input type="number" id="d_${i}" value="500"/> 
+    Custo Produção <input type="number" id="c_${i}" value="2"/> 
+    Custo Estoque <input type="number" id="h_${i}" value="1"/> 
+    Lotes (separados por vírgula) <input type="text" id="l_${i}" value="0,500,1000"/>`;
     form.appendChild(row);
   }
   const btn = document.createElement('button');
@@ -67,57 +67,60 @@ function renderForm(){
 // --- Ler problema ---
 function readProblem(){
   const n = +document.getElementById('nPeriods').value;
-  const Q = +document.getElementById('maxProd').value;
-  const demand=[], prodCost=[], holdCost=[];
+  const Q = +document.getElementById('maxStock').value;
+  const demand=[], prodCost=[], holdCost=[], lots=[];
   for(let i=0;i<n;i++){
     demand.push(+document.getElementById(`d_${i}`).value);
     prodCost.push(+document.getElementById(`c_${i}`).value);
     holdCost.push(+document.getElementById(`h_${i}`).value);
+    lots.push(document.getElementById(`l_${i}`).value.split(',').map(Number));
   }
-  return {n,Q,demand,prodCost,holdCost};
+  return {n,Q,demand,prodCost,holdCost,lots};
 }
 
-// --- Construir tabela DP interna (calcular produção ótima) ---
+// --- Construir DP e armazenar custos ótimos ---
 function buildTable(){
   problem = readProblem();
-  const {n,Q,demand,prodCost,holdCost} = problem;
+  const {n,Q,demand,prodCost,holdCost,lots} = problem;
   
+  // Inicialização
   const dp = Array.from({length:n+1},()=>Array(Q+1).fill(Infinity));
-  const xDecision = Array.from({length:n+1},()=>Array(Q+1).fill(0));
-  dp[0][0] = 0;
+  dp[0][0]=0;
+  possibleStocks = [new Set([0])]; // Estoques possíveis por período
 
   for(let t=1;t<=n;t++){
-    for(let sPrev=0;sPrev<=Q;sPrev++){
-      if(dp[t-1][sPrev] < Infinity){
-        for(let x=0;x<=Q;x++){
-          const sFinal = sPrev + x - demand[t-1];
-          if(sFinal>=0 && sFinal<=Q){
-            const cost = dp[t-1][sPrev] + x*prodCost[t-1] + sFinal*holdCost[t-1];
-            if(cost < dp[t][sFinal]){
-              dp[t][sFinal] = cost;
-              xDecision[t][sFinal] = x;
-            }
+    const stockSet = new Set();
+    for(const sPrev of possibleStocks[t-1]){
+      for(const x of lots[t-1]){
+        const sFinal = sPrev + x - demand[t-1];
+        if(sFinal>=0 && sFinal<=Q){
+          const cost = dp[t-1][sPrev] + x*prodCost[t-1] + sFinal*holdCost[t-1];
+          if(dp[t][sFinal]===Infinity || cost<dp[t][sFinal]){
+            dp[t][sFinal]=cost;
           }
+          stockSet.add(sFinal);
         }
       }
     }
+    possibleStocks.push(stockSet);
   }
 
-  optimalX = xDecision;
+  optimalCost = dp;
   renderStudentTable();
 }
 
-// --- Renderizar tabela para aluno preencher ---
+// --- Renderizar tabela com apenas estoques possíveis ---
 function renderStudentTable(){
-  const {n,Q} = problem;
+  const {n} = problem;
   const container = document.getElementById('tableArea');
-  container.innerHTML='<strong>Preencha a produção (x_t) para cada período e estoque final:</strong>';
+  container.innerHTML='<strong>Preencha os custos mínimos para cada estoque final possível:</strong>';
   const tbl = document.createElement('table');
   const thead = document.createElement('thead');
   const htr = document.createElement('tr');
   htr.appendChild(document.createElement('th'));
-  for(let s=0;s<=Q;s++){
-    const th = document.createElement('th'); th.innerText=`Estoque ${s}`;
+  for(const s of Array.from(possibleStocks[1]).sort((a,b)=>a-b)){
+    const th = document.createElement('th'); th.innerText=s;
+    th.dataset.s=s;
     htr.appendChild(th);
   }
   thead.appendChild(htr);
@@ -127,10 +130,11 @@ function renderStudentTable(){
   for(let t=1;t<=n;t++){
     const tr = document.createElement('tr');
     const td0 = document.createElement('td'); td0.innerText=`Período ${t}`; tr.appendChild(td0);
-    for(let s=0;s<=Q;s++){
+    const stocks = Array.from(possibleStocks[t]).sort((a,b)=>a-b);
+    for(const s of stocks){
       const td = document.createElement('td');
       const input = document.createElement('input');
-      input.type='number'; input.style.width='60px'; 
+      input.type='number'; input.style.width='60px';
       input.dataset.t=t; input.dataset.s=s;
       td.appendChild(input);
       tr.appendChild(td);
@@ -141,28 +145,25 @@ function renderStudentTable(){
   container.appendChild(tbl);
 
   const btnCheck = document.createElement('button');
-  btnCheck.innerText='Verificar Produção';
+  btnCheck.innerText='Verificar Custos';
   btnCheck.style.marginTop='10px';
   btnCheck.addEventListener('click', checkTable);
   container.appendChild(btnCheck);
 }
 
-// --- Verificar respostas do aluno ---
+// --- Verificar respostas ---
 function checkTable(){
   const studentName = document.getElementById('studentName').value.trim();
-  if(!studentName){
-    alert('Por favor, digite o nome do aluno!');
-    return;
-  }
+  if(!studentName){ alert('Digite o nome do aluno!'); return; }
 
   const inputs = document.querySelectorAll('#tableArea input[type="number"]');
-  let correctCount = 0;
+  let correctCount=0;
 
   inputs.forEach(inp=>{
     const t = +inp.dataset.t;
     const s = +inp.dataset.s;
     const val = +inp.value;
-    if(optimalX[t][s] === val){
+    if(optimalCost[t][s] === val){
       correctCount++;
       inp.parentElement.className='correct';
     } else {
@@ -171,25 +172,18 @@ function checkTable(){
   });
 
   const totalCells = inputs.length;
-  const score = Math.round((correctCount / totalCells) * 100);
-
+  const score = Math.round((correctCount/totalCells)*100);
   const fb = document.getElementById('feedback');
-  if(score === 100){
-    fb.innerText=`✅ Parabéns, ${studentName}! Todas as decisões corretas. Nota: ${score}/100`;
-    fb.className='status ok';
-  } else {
-    fb.innerText=`❌ Algumas decisões incorretas. Nota: ${score}/100`;
-    fb.className='status error';
-  }
-
+  fb.innerText = score===100? `✅ Parabéns, ${studentName}! Todos os custos corretos. Nota: ${score}/100`:
+                             `❌ Alguns custos incorretos. Nota: ${score}/100`;
+  fb.className = score===100?'status ok':'status error';
   addDownloadButton(studentName, score, correctCount, totalCells);
 }
 
-// --- Adicionar botão PDF ---
+// --- Botão PDF ---
 function addDownloadButton(name, score, correct, total){
   const existingBtn = document.getElementById('downloadPDF');
   if(existingBtn) existingBtn.remove();
-
   const btn = document.createElement('button');
   btn.id='downloadPDF';
   btn.innerText='Baixar Relatório em PDF';
@@ -209,14 +203,12 @@ function generatePDF(name, score, correct, total){
   doc.setFontSize(12);
   doc.text(`Aluno: ${name}`, 20, 35);
   doc.text(`Nota: ${score}/100`, 20, 45);
-  doc.text(`Decisões corretas: ${correct} de ${total}`, 20, 55);
-  doc.text('Células corretas aparecem em verde e incorretas em vermelho na tabela.', 20, 65);
+  doc.text(`Células corretas: ${correct} de ${total}`, 20, 55);
+  doc.text('Células corretas aparecem em verde e incorretas em vermelho.', 20, 65);
   doc.save(`Relatorio_${name.replace(/\s+/g,'_')}.pdf`);
 }
 
-// --- Eventos ---
 document.getElementById('build').addEventListener('click', renderForm);
-
 </script>
 </body>
 </html>
